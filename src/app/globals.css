@@ -1,0 +1,64 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --maroon: #6B0F1A;
+  --gold: #C9A84C;
+  --cream: #FFFBF3;
+  --ink: #2A1A1C;
+}
+
+html { -webkit-text-size-adjust: 100%; }
+body {
+  background: var(--cream);
+  color: var(--ink);
+  font-feature-settings: "kern";
+}
+html[lang="hi"] body { line-height: 1.7; }
+
+@layer components {
+  .container-page { @apply mx-auto w-full max-w-6xl px-4 sm:px-6; }
+  .btn { @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition active:scale-[.98] disabled:cursor-not-allowed disabled:opacity-50; }
+  .btn-primary { @apply btn bg-maroon text-white shadow-sm hover:bg-maroon-600; }
+  .btn-gold { @apply btn bg-gold text-maroon-900 shadow-sm hover:bg-gold-300; }
+  .btn-outline { @apply btn border border-maroon/25 bg-white text-maroon hover:border-maroon/50 hover:bg-maroon-50; }
+  .btn-ghost { @apply btn text-maroon hover:bg-maroon-50; }
+  .card { @apply rounded-2xl border border-maroon/10 bg-white shadow-[0_1px_2px_rgba(107,15,26,.04),0_8px_24px_-12px_rgba(107,15,26,.12)]; }
+  .chip { @apply inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-sm transition select-none; }
+  .chip-off { @apply chip border-maroon/15 bg-white text-ink hover:border-maroon/40; }
+  .chip-on { @apply chip border-maroon bg-maroon text-white; }
+  .badge { @apply inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide; }
+  .input { @apply w-full rounded-xl border border-maroon/15 bg-white px-3.5 py-2.5 text-[15px] outline-none transition placeholder:text-stone-400 focus:border-maroon focus:ring-2 focus:ring-maroon/10; }
+  .label { @apply mb-1.5 block text-sm font-medium text-stone-700; }
+  .h-display { @apply font-display font-bold tracking-tight text-maroon; }
+}
+
+.text-ink { color: var(--ink); }
+
+/* Rich text inside questions & solutions */
+.rich { font-size: 1rem; line-height: 1.7; overflow-wrap: anywhere; }
+.rich p { margin: 0 0 .5rem; }
+.rich p:last-child { margin-bottom: 0; }
+.rich ol { list-style: decimal; padding-left: 1.4rem; margin: .4rem 0 .6rem; }
+.rich ul { list-style: disc; padding-left: 1.4rem; margin: .4rem 0 .6rem; }
+.rich table { border-collapse: collapse; margin: .6rem 0; width: 100%; font-size: .95em; display: block; overflow-x: auto; }
+.rich th, .rich td { border: 1px solid rgba(107,15,26,.25); padding: .4rem .6rem; text-align: left; vertical-align: top; min-width: 7rem; }
+.rich th { background: #FBF1F2; color: var(--maroon); font-weight: 600; }
+.rich img { max-width: 100%; height: auto; border-radius: .5rem; margin: .5rem 0; }
+.rich b, .rich strong { color: #4b0a12; }
+
+/* Tiptap editor */
+.ProseMirror { min-height: 140px; outline: none; padding: .75rem 1rem; }
+.ProseMirror table { border-collapse: collapse; width: 100%; }
+.ProseMirror td, .ProseMirror th { border: 1px solid #d6c3c5; padding: 4px 8px; min-width: 60px; position: relative; }
+.ProseMirror th { background: #FBF1F2; }
+.ProseMirror .selectedCell:after { content: ""; position: absolute; inset: 0; background: rgba(201,168,76,.25); pointer-events: none; }
+.ProseMirror p.is-editor-empty:first-child::before { content: attr(data-placeholder); color: #a8a29e; float: left; height: 0; pointer-events: none; }
+
+.pattern-dots {
+  background-image: radial-gradient(rgba(201,168,76,.35) 1px, transparent 1px);
+  background-size: 18px 18px;
+}
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { scrollbar-width: none; }
