@@ -99,7 +99,7 @@ create table public.questions (
   is_high_priority boolean not null default false,   -- manual flag by staff
   theme            text,                             -- repeated-theme tag, e.g. 'champaran'
   source           text not null default 'pyq',      -- 'pyq' | 'sample' | 'current_affairs' | 'test_series'
-  created_by       uuid references auth.users(id) on delete set null default (auth.jwt()->>'sub'),
+  created_by       text default (auth.jwt()->>'sub'),
   created_at       timestamptz not null default now(),
   updated_at       timestamptz not null default now()
 );
