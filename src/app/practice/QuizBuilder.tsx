@@ -6,6 +6,8 @@ import { ConfigNotice, LoginPrompt, PageHeader, Spinner } from "@/components/ui"
 import { getSupabase } from "@/lib/supabase/client";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import type { QuizMode, QuizSource } from "@/lib/types";
+import { fetchApi } from "@/lib/api-client";
+import { useAuth } from "@clerk/nextjs";
 import { fetchQuizIds, startQuiz } from "./startQuiz";
 import { IconCheck } from "@/components/icons";
 
@@ -15,6 +17,7 @@ export function QuizBuilder() {
   const { t, pick, taxonomy, user, profile, authReady, lang } = useApp();
   const router = useRouter();
   const params = useSearchParams();
+  const { getToken } = useAuth();
 
   const [step, setStep] = useState(0);
   const [source, setSource] = useState<QuizSource>((params.get("source") as QuizSource) || "all");
@@ -47,16 +50,20 @@ export function QuizBuilder() {
     let cancelled = false;
     const run = async () => {
       try {
+        const clerkToken = user ? await getToken({ template: "supabase" }) : null;
         if (source === "all" && !hpOnly) {
-          const { data } = await getSupabase().rpc("count_questions", {
-            p_subject_ids: subjectIds.length ? subjectIds : null,
-            p_topic_ids: topicIds.length ? topicIds : null,
-            p_exam_ids: examIds.length ? examIds : null,
-          });
-          if (!cancelled) setAvailable(typeof data === "number" ? data : 0);
+          const data = await fetchApi("/quiz/count", {
+            method: "POST",
+            body: JSON.stringify({
+              subjectIds: subjectIds.length ? subjectIds : null,
+              topicIds: topicIds.length ? topicIds : null,
+              examIds: examIds.length ? examIds : null,
+            })
+          }, clerkToken);
+          if (!cancelled) setAvailable(data.count);
         } else {
           if (source !== "all" && !user) { setAvailable(0); return; }
-          const ids = await fetchQuizIds({ subjectIds, topicIds, examIds, count: 150, source, highPriorityOnly: hpOnly });
+          const ids = await fetchQuizIds({ subjectIds, topicIds, examIds, count: 150, source, highPriorityOnly: hpOnly }, clerkToken);
           if (!cancelled) setAvailable(ids.length);
         }
       } catch { if (!cancelled) setAvailable(null); }
@@ -71,9 +78,15 @@ export function QuizBuilder() {
     set(arr.includes(id) ? arr.filter((x) => x !== id) : [...arr, id]);
 
   const start = async () => {
+    if (!user) {
+      router.push("/login?redirect_url=/practice");
+      return;
+    }
+    
     setStarting(true); setError(null);
     try {
-      const ids = await fetchQuizIds({ subjectIds, topicIds, examIds, count: finalCount, source, highPriorityOnly: hpOnly });
+      const clerkToken = await getToken({ template: "supabase" });
+      const ids = await fetchQuizIds({ subjectIds, topicIds, examIds, count: finalCount, source, highPriorityOnly: hpOnly }, clerkToken);
       if (ids.length === 0) { setError(t("no_questions")); setStarting(false); return; }
       const subjNames = subjectIds.length ? subjectIds.map((id) => subjects.find((s) => s.id === id)?.name_en).filter(Boolean).join(", ") : "All subjects";
       const prefix = source === "mistakes" ? "Mistakes · " : source === "bookmarks" ? "Bookmarks · " : "";
@@ -81,7 +94,7 @@ export function QuizBuilder() {
         questionIds: ids, mode, source,
         title: `${prefix}${subjNames}`.slice(0, 120),
         config: { subjectIds, topicIds, examIds, requested: finalCount, hpOnly },
-        user, settings: taxonomy.settings,
+        user, clerkToken, settings: taxonomy.settings,
       });
       router.push(`/quiz/${id}`);
     } catch (e) {

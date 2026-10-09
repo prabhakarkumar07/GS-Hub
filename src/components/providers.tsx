@@ -1,8 +1,7 @@
 "use client";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { useUser } from "@clerk/nextjs";
-import { useClerkSupabase } from "@/lib/supabase/clerk-client";
-import { isSupabaseConfigured } from "@/lib/supabase/env";
+import { useAuth, useUser } from "@clerk/nextjs";
+import { fetchApi } from "@/lib/api-client";
 import { translate, type TKey } from "@/lib/i18n";
 import type { AppSettings, AppUser, Exam, Lang, Subject, Topic } from "@/lib/types";
 
@@ -44,7 +43,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   // Clerk auth state
   const { user: clerkUser, isLoaded } = useUser();
-  const supabase = useClerkSupabase();
+  const { getToken } = useAuth();
 
   // Expose a simplified user object so the rest of the app doesn't need to know about Clerk
   const user = clerkUser
@@ -73,66 +72,51 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     try { localStorage.setItem("gshub_lang", l); } catch { /* ignore */ }
   }, []);
 
-  // Load profile from Supabase whenever the Clerk user changes
+  // Load profile from new API backend whenever the Clerk user changes
   useEffect(() => {
-    if (!isSupabaseConfigured || !supabase || !clerkUser) {
+    if (!clerkUser) {
       setProfile(null);
       return;
     }
     
     async function loadOrCreateProfile() {
-      // 1. Try to fetch existing profile
-      const { data, error } = await supabase!
-        .from("profiles")
-        .select("id, full_name, role, preferred_lang, subscription_tier")
-        .eq("id", clerkUser!.id)
-        .maybeSingle();
-
-      if (data) {
-        setProfile(data as Profile);
-        return;
-      }
-
-      // 2. If it doesn't exist, create it
-      const newProfile = {
-        id: clerkUser!.id,
-        full_name: clerkUser!.fullName,
-        role: "student",
-        preferred_lang: "en",
-      };
-
-      const { data: inserted, error: insertError } = await supabase!
-        .from("profiles")
-        .insert(newProfile)
-        .select("id, full_name, role, preferred_lang, subscription_tier")
-        .single();
-
-      if (!insertError && inserted) {
-        setProfile(inserted as Profile);
+      try {
+        const token = await getToken({ template: "supabase" });
+        const { profile: loadedProfile } = await fetchApi("/profile/loadOrCreate", {
+          method: "POST",
+          body: JSON.stringify({
+            user: {
+              id: clerkUser!.id,
+              name: clerkUser!.fullName,
+              email: clerkUser!.primaryEmailAddress?.emailAddress
+            }
+          })
+        }, token);
+        setProfile(loadedProfile as Profile);
+      } catch (err) {
+        console.error("Failed to load profile:", err);
       }
     }
 
     loadOrCreateProfile();
-  }, [clerkUser, supabase]);
+  }, [clerkUser, getToken]);
 
   const reloadTaxonomy = useCallback(async () => {
-    if (!isSupabaseConfigured || !supabase) return;
-    const [s, t, e, st] = await Promise.all([
-      supabase.from("subjects").select("*").order("sort_order"),
-      supabase.from("topics").select("*").order("sort_order"),
-      supabase.from("exams").select("*").order("sort_order"),
-      supabase.from("app_settings").select("positive_marks, negative_marks, seconds_per_question, min_stats_attempts").eq("id", 1).maybeSingle(),
-    ]);
-    setTaxonomy({
-      subjects: (s.data as Subject[]) ?? [],
-      topics: (t.data as Topic[]) ?? [],
-      exams: (e.data as Exam[]) ?? [],
-      settings: st.data
-        ? { positive_marks: Number(st.data.positive_marks), negative_marks: Number(st.data.negative_marks), seconds_per_question: st.data.seconds_per_question, min_stats_attempts: st.data.min_stats_attempts }
-        : DEFAULT_SETTINGS,
-      loaded: true,
-    });
-  }, [supabase]);
+    try {
+      const data = await fetchApi("/taxonomy");
+      setTaxonomy({
+        subjects: data.subjects ?? [],
+        topics: data.topics ?? [],
+        exams: data.exams ?? [],
+        settings: data.settings
+          ? { positive_marks: Number(data.settings.positive_marks), negative_marks: Number(data.settings.negative_marks), seconds_per_question: data.settings.seconds_per_question, min_stats_attempts: data.settings.min_stats_attempts }
+          : DEFAULT_SETTINGS,
+        loaded: true,
+      });
+    } catch (err) {
+      console.error("Failed to load taxonomy:", err);
+    }
+  }, []);
 
   useEffect(() => { reloadTaxonomy(); }, [reloadTaxonomy]);
 

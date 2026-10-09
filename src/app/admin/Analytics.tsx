@@ -1,7 +1,8 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { getSupabase } from "@/lib/supabase/client";
+import { fetchApi } from "@/lib/api-client";
+import { useAuth } from "@clerk/nextjs";
 import { Spinner, Stat } from "@/components/ui";
 
 interface Data {
@@ -14,9 +15,15 @@ interface Data {
 export function Analytics() {
   const [d, setD] = useState<Data | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const { getToken } = useAuth();
+  
   useEffect(() => {
-    getSupabase().rpc("admin_analytics").then(({ data, error }) => (error ? setErr(error.message) : setD(data as Data)));
-  }, []);
+    getToken({ template: "supabase" }).then((token) => {
+      fetchApi("/admin/analytics", {}, token)
+        .then((data) => setD(data.analytics as Data))
+        .catch((e) => setErr(e.message));
+    });
+  }, [getToken]);
   if (err) return <p className="rounded-xl bg-red-50 p-4 text-red-800">{err}</p>;
   if (!d) return <Spinner />;
   const max = Math.max(1, ...d.dau_series.map((x) => x.users));

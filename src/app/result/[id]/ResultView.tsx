@@ -7,9 +7,8 @@ import { QuestionBody, QuestionMeta, SolutionBox } from "@/components/QuestionBo
 import { BookmarkButton } from "@/components/BookmarkButton";
 import { Bar, LoginPrompt, Spinner, StrengthBadge } from "@/components/ui";
 import { RichText } from "@/components/RichText";
-import { getSupabase } from "@/lib/supabase/client";
-import { isSupabaseConfigured } from "@/lib/supabase/env";
-import { loadSession } from "@/lib/quiz-store";
+import { fetchApi } from "@/lib/api-client";
+import { useAuth } from "@clerk/nextjs";
 import { formatDuration, gradeQuiz, type GradedQuestion, type ResultSummary } from "@/lib/scoring";
 import type { Attempt, Question, QuestionStat, Responses } from "@/lib/types";
 
@@ -27,6 +26,7 @@ interface Loaded {
 
 export function ResultView() {
   const { id } = useParams<{ id: string }>();
+  const { getToken } = useAuth();
   const { t, user, authReady, subjectName, topicName, pick, lang, taxonomy } = useApp();
   const [data, setData] = useState<Loaded | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "missing">("loading");
@@ -35,47 +35,62 @@ export function ResultView() {
   const [bookmarks, setBookmarks] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    if (!authReady || !isSupabaseConfigured || !taxonomy.loaded) return;
+    if (!authReady || !taxonomy.loaded) return;
     (async () => {
-      const sb = getSupabase();
       let qids: string[] = [], responses: Responses = {}, title = "Quiz", mode: "practice" | "exam" = "practice";
       let positive = taxonomy.settings.positive_marks, negative = taxonomy.settings.negative_marks, timeTaken = 0, synced = false;
       const effects: Record<string, string | null> = {};
-
-      let attempt: Attempt | null = null;
-      if (user) {
-        const { data: a } = await sb.from("quiz_attempts").select("*").eq("id", id).maybeSingle();
-        attempt = a as Attempt | null;
-      }
-      if (attempt && attempt.status === "submitted") {
-        qids = attempt.question_ids; responses = attempt.responses ?? {}; title = attempt.title ?? title; mode = attempt.mode;
-        positive = Number(attempt.positive_marks); negative = Number(attempt.negative_marks); timeTaken = attempt.time_taken_sec ?? 0; synced = true;
-        const { data: ans } = await sb.from("attempt_answers").select("question_id, notebook_effect").eq("attempt_id", id);
-        (ans ?? []).forEach((r) => { effects[r.question_id as string] = r.notebook_effect as string | null; });
-      } else {
-        const s = loadSession(id);
-        if (!s || s.status !== "submitted") { setState("missing"); return; }
-        qids = s.questionIds; responses = s.responses; title = s.title; mode = s.mode;
-        positive = s.positiveMarks; negative = s.negativeMarks; timeTaken = s.elapsedSec;
-      }
-
-      const [{ data: qs }, { data: st }, bm] = await Promise.all([
-        sb.from("questions").select("*, high_priority").in("id", qids),
-        sb.rpc("get_question_stats", { p_ids: qids }),
-        user ? sb.from("bookmarks").select("question_id").in("question_id", qids) : Promise.resolve({ data: [] as { question_id: string }[] }),
-      ]);
-      const byId = new Map(((qs as Question[]) ?? []).map((q) => [q.id, q]));
-      const ordered = qids.map((q) => byId.get(q)).filter(Boolean) as Question[];
       const stats: Record<string, QuestionStat> = {};
-      ((st as QuestionStat[]) ?? []).forEach((x) => { stats[x.question_id] = x; });
-      setBookmarks(new Set((bm.data ?? []).map((b) => b.question_id)));
-      setData({
-        title, mode, timeTaken, synced, effects, stats, positive, negative,
-        summary: gradeQuiz(ordered, responses, positive, negative, stats, taxonomy.settings.min_stats_attempts),
-      });
-      setState("ready");
-    })().catch(() => setState("missing"));
-  }, [id, authReady, user, taxonomy.loaded, taxonomy.settings]);
+      let qs: Question[] = [];
+      let bm: any[] = [];
+
+      try {
+        if (user) {
+          const token = await getToken({ template: "supabase" });
+          const data = await fetchApi(`/quiz/${id}/result`, {}, token);
+          const attempt = data.attempt;
+          
+          qids = attempt.question_ids; responses = attempt.responses ?? {}; title = attempt.title ?? title; mode = attempt.mode;
+          positive = Number(attempt.positive_marks); negative = Number(attempt.negative_marks); timeTaken = attempt.time_taken_sec ?? 0; synced = true;
+          
+          (data.answers ?? []).forEach((r: any) => { effects[r.question_id] = r.notebook_effect; });
+          ((data.stats as QuestionStat[]) ?? []).forEach((x) => { stats[x.question_id] = x; });
+          qs = data.questions || [];
+          bm = data.bookmarks || [];
+        } else {
+          // Keep local logic for anonymous users
+          const s = (await import("@/lib/quiz-store")).loadSession(id);
+          if (!s || s.status !== "submitted") { setState("missing"); return; }
+          qids = s.questionIds; responses = s.responses; title = s.title; mode = s.mode;
+          positive = s.positiveMarks; negative = s.negativeMarks; timeTaken = s.elapsedSec;
+          
+          const token = null;
+          // Anonymous users shouldn't have bookmarks, we just need questions and stats
+          // We can use the admin endpoint or create a public one. Since we don't have it, we use Supabase directly for anonymous local quizzes.
+          const sb = (await import("@/lib/supabase/client")).getSupabase();
+          const [{ data: qsData }, { data: stData }] = await Promise.all([
+            sb.from("questions").select("*, high_priority").in("id", qids),
+            sb.rpc("get_question_stats", { p_ids: qids })
+          ]);
+          qs = (qsData as Question[]) || [];
+          ((stData as QuestionStat[]) ?? []).forEach((x) => { stats[x.question_id] = x; });
+        }
+
+        const byId = new Map(qs.map((q) => [q.id, q]));
+        const ordered = qids.map((q) => byId.get(q)).filter(Boolean) as Question[];
+        
+        setBookmarks(new Set(bm.map((b: any) => b.question_id)));
+        setData({
+          title, mode, timeTaken, synced, effects, stats, positive, negative,
+          summary: gradeQuiz(ordered, responses, positive, negative, stats, taxonomy.settings.min_stats_attempts),
+        });
+        setState("ready");
+      } catch (err) {
+        console.error(err);
+        setState("missing");
+      }
+    })();
+  }, [id, authReady, user, taxonomy.loaded, taxonomy.settings, getToken]);
 
   const impact = useMemo(() => {
     if (!data) return { missed: [] as GradedQuestion[], tough: [] as GradedQuestion[] };
@@ -86,7 +101,7 @@ export function ResultView() {
     };
   }, [data]);
 
-  if (!isSupabaseConfigured) return <div className="container-page py-16 text-center text-stone-600">{t("not_configured")}</div>;
+
   if (state === "loading") return <Spinner label={t("loading")} />;
   if (state === "missing" || !data) {
     return (

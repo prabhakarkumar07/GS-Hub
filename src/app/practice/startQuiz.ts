@@ -1,5 +1,5 @@
 "use client";
-import { getSupabase } from "@/lib/supabase/client";
+import { fetchApi } from "@/lib/api-client";
 import { newId, saveSession } from "@/lib/quiz-store";
 import type { AppSettings, AppUser, QuizMode, QuizSession, QuizSource } from "@/lib/types";
 
@@ -12,17 +12,20 @@ export interface BuildParams {
   highPriorityOnly?: boolean;
 }
 
-export async function fetchQuizIds(p: BuildParams): Promise<string[]> {
-  const { data, error } = await getSupabase().rpc("build_quiz", {
-    p_subject_ids: p.subjectIds?.length ? p.subjectIds : null,
-    p_topic_ids: p.topicIds?.length ? p.topicIds : null,
-    p_exam_ids: p.examIds?.length ? p.examIds : null,
-    p_count: p.count,
-    p_source: p.source,
-    p_high_priority_only: !!p.highPriorityOnly,
-  });
-  if (error) throw error;
-  return (data as string[]) ?? [];
+export async function fetchQuizIds(p: BuildParams, clerkToken?: string | null): Promise<string[]> {
+  const data = await fetchApi("/quiz/build", {
+    method: "POST",
+    body: JSON.stringify({
+      subjectIds: p.subjectIds?.length ? p.subjectIds : null,
+      topicIds: p.topicIds?.length ? p.topicIds : null,
+      examIds: p.examIds?.length ? p.examIds : null,
+      count: p.count,
+      source: p.source,
+      highPriorityOnly: !!p.highPriorityOnly,
+    })
+  }, clerkToken);
+  
+  return (data.ids as string[]) ?? [];
 }
 
 /** Creates a quiz session (DB row for logged-in users, localStorage always) and returns its id. */
@@ -33,6 +36,7 @@ export async function startQuiz(opts: {
   title: string;
   config: Record<string, unknown>;
   user: AppUser | null;
+  clerkToken?: string | null;
   settings: AppSettings;
 }): Promise<string> {
   const id = newId();
@@ -42,16 +46,19 @@ export async function startQuiz(opts: {
   let synced = false;
 
   if (opts.user) {
-    const { data, error } = await getSupabase()
-      .from("quiz_attempts")
-      .insert({ id, mode: opts.mode, source: opts.source, question_ids: opts.questionIds, title: opts.title, config: opts.config })
-      .select("positive_marks, negative_marks, time_limit_sec")
-      .single();
-    if (error) throw error;
-    positive = Number(data.positive_marks);
-    negative = Number(data.negative_marks);
-    timeLimit = data.time_limit_sec;
-    synced = true;
+    const data = await fetchApi("/quiz/start", {
+      method: "POST",
+      body: JSON.stringify({
+        id, mode: opts.mode, source: opts.source, questionIds: opts.questionIds, title: opts.title, config: opts.config
+      })
+    }, opts.clerkToken);
+    
+    if (data.attempt) {
+      positive = Number(data.attempt.positive_marks);
+      negative = Number(data.attempt.negative_marks);
+      timeLimit = data.attempt.time_limit_sec;
+      synced = true;
+    }
   }
 
   const session: QuizSession = {

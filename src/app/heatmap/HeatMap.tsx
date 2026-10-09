@@ -3,20 +3,29 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useApp } from "@/components/providers";
 import { ConfigNotice, Empty, PageHeader, Spinner, heatColor } from "@/components/ui";
-import { getSupabase } from "@/lib/supabase/client";
-import { isSupabaseConfigured } from "@/lib/supabase/env";
+import { fetchApi } from "@/lib/api-client";
+import { useAuth } from "@clerk/nextjs";
 
 interface Row { subject_id: number; topic_id: number | null; attempted: number; correct: number }
 
 export function HeatMap() {
   const { t, user, authReady, taxonomy, pick, lang } = useApp();
+  const { getToken } = useAuth();
   const [rows, setRows] = useState<Row[] | null>(null);
   const [active, setActive] = useState<number | null>(null);
 
   useEffect(() => {
-    if (!authReady || !user || !isSupabaseConfigured) return;
-    getSupabase().rpc("get_my_accuracy").then(({ data }) => setRows((data as Row[]) ?? []));
-  }, [authReady, user]);
+    if (!authReady || !user) return;
+    (async () => {
+      try {
+        const token = await getToken({ template: "supabase" });
+        const data = await fetchApi("/user/heatmap", {}, token);
+        setRows((data.rows as Row[]) ?? []);
+      } catch (err) {
+        console.error("Failed to load heatmap:", err);
+      }
+    })();
+  }, [authReady, user, getToken]);
 
   const subjects = useMemo(() => {
     return taxonomy.subjects.map((s) => {
@@ -34,7 +43,6 @@ export function HeatMap() {
     return t("focus_next", { a: names.join(lang === "hi" ? " और " : " and ") });
   }, [subjects, pick, t, lang]);
 
-  if (!isSupabaseConfigured) return <div className="container-page py-10"><ConfigNotice /></div>;
   if (!authReady || rows === null) return <Spinner label={t("loading")} />;
 
   const activeSubject = subjects.find((x) => x.s.id === active);

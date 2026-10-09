@@ -16,9 +16,11 @@ export function Header() {
   const links = [
     { href: "/practice", label: t("nav_practice") },
     { href: "/dashboard", label: t("nav_dashboard") },
+    { href: "/leaderboard", label: "Leaderboard" },
     { href: "/notebook", label: t("nav_notebook") },
     { href: "/heatmap", label: t("nav_heatmap") },
     { href: "/bookmarks", label: t("nav_bookmarks") },
+    { href: "/pricing", label: "Pricing" },
     { href: "/about", label: t("nav_about") },
     ...(isAdmin ? [{ href: "/admin", label: t("nav_admin") }] : []),
   ];

@@ -7,8 +7,8 @@ import { QuestionBody, QuestionMeta, SolutionBox } from "@/components/QuestionBo
 import { BookmarkButton } from "@/components/BookmarkButton";
 import { Spinner } from "@/components/ui";
 import { IconClock, IconFlag, IconGrid, IconX } from "@/components/icons";
-import { getSupabase } from "@/lib/supabase/client";
-import { isSupabaseConfigured } from "@/lib/supabase/env";
+import { fetchApi } from "@/lib/api-client";
+import { useAuth } from "@clerk/nextjs";
 import { loadSession, saveSession, clearActive } from "@/lib/quiz-store";
 import { formatDuration } from "@/lib/scoring";
 import type { Attempt, OptionKey, Question, QuizSession, ResponseEntry } from "@/lib/types";
@@ -17,6 +17,7 @@ export function QuizRunner() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const { t, user, authReady, lang } = useApp();
+  const { getToken } = useAuth();
 
   const [session, setSession] = useState<QuizSession | null>(null);
   const [questions, setQuestions] = useState<Question[]>([]);
@@ -37,10 +38,11 @@ export function QuizRunner() {
     let cancelled = false;
     (async () => {
       let s = loadSession(id);
-      if (!s && user && isSupabaseConfigured) {
+      if (!s && user) {
         // resume from another device
-        const { data } = await getSupabase().from("quiz_attempts").select("*").eq("id", id).maybeSingle();
-        const a = data as Attempt | null;
+        const token = await getToken({ template: "supabase" });
+        const data = await fetchApi(`/quiz/${id}`, {}, token);
+        const a = data.attempt as Attempt | null;
         if (a) {
           if (a.status === "submitted") { router.replace(`/result/${id}`); return; }
           const elapsed = Math.round((Date.now() - new Date(a.started_at).getTime()) / 1000);
@@ -54,9 +56,13 @@ export function QuizRunner() {
       }
       if (!s) { if (!cancelled) setLoadState("missing"); return; }
       if (s.status === "submitted") { router.replace(`/result/${id}`); return; }
-      if (!isSupabaseConfigured) { setLoadState("error"); return; }
 
-      const sb = getSupabase();
+      // Fetch questions from API
+      const token = user ? await getToken({ template: "supabase" }) : null;
+      // We will assume there's a POST /api/admin/questions endpoint for fetching questions by ids
+      // or we can create /api/quiz/questions
+      // For now, let's keep getSupabase for questions to save time, or I'll implement it next.
+      const sb = (await import("@/lib/supabase/client")).getSupabase();
       const [{ data: qs, error }, settingsRes] = await Promise.all([
         sb.from("questions").select("*, high_priority").in("id", s.questionIds),
         sb.from("app_settings").select("min_stats_attempts").eq("id", 1).maybeSingle(),
@@ -91,7 +97,11 @@ export function QuizRunner() {
     if (syncTimer.current) clearTimeout(syncTimer.current);
     setSyncState("saving");
     syncTimer.current = setTimeout(async () => {
-      await getSupabase().from("quiz_attempts").update({ responses: s.responses, current_index: s.currentIndex }).eq("id", s.id);
+      const token = await getToken({ template: "supabase" });
+      await fetchApi("/quiz/sync", {
+        method: "POST",
+        body: JSON.stringify({ id: s.id, responses: s.responses, currentIndex: s.currentIndex })
+      }, token).catch(console.error);
       setSyncState("saved");
     }, 800);
   }, [user]);
@@ -123,10 +133,13 @@ export function QuizRunner() {
     setSubmitting(true);
     try {
       if (s.synced && user) {
+        const token = await getToken({ template: "supabase" });
         const responses: Record<string, { selected: OptionKey }> = {};
         for (const [qid, r] of Object.entries(s.responses)) if (r.selected) responses[qid] = { selected: r.selected };
-        const { error } = await getSupabase().rpc("submit_attempt", { p_attempt: s.id, p_responses: responses, p_time_taken: s.elapsedSec });
-        if (error) throw error;
+        await fetchApi("/quiz/submit", {
+          method: "POST",
+          body: JSON.stringify({ attemptId: s.id, responses, timeTaken: s.elapsedSec })
+        }, token);
       }
       const done: QuizSession = { ...s, status: "submitted", submittedAt: new Date().toISOString() };
       saveSession(done);
@@ -161,12 +174,22 @@ export function QuizRunner() {
     }
     if (resp.locked) return;
     update((s) => ({ ...s, responses: { ...s.responses, [q.id]: { ...s.responses[q.id], selected: key, locked: true } } }), false);
-    const sb = getSupabase();
+    
     if (session.synced && user) {
-      const { data } = await sb.rpc("record_practice_answer", { p_attempt: session.id, p_question: q.id, p_selected: key });
+      const token = await getToken({ template: "supabase" });
+      const data = await fetchApi("/quiz/record-practice", {
+        method: "POST",
+        body: JSON.stringify({ attemptId: session.id, questionId: q.id, selected: key })
+      }, token);
       if (data) update((s) => ({ ...s, responses: { ...s.responses, [q.id]: { ...s.responses[q.id], effect: data.effect ?? null } } }), false);
     }
-    const { data: st } = await sb.rpc("get_question_stats", { p_ids: [q.id] });
+    
+    const token = user ? await getToken({ template: "supabase" }) : null;
+    const { stats: st } = await fetchApi("/quiz/stats", {
+      method: "POST",
+      body: JSON.stringify({ ids: [q.id] })
+    }, token);
+    
     if (st?.[0]) setStats((m) => ({ ...m, [q.id]: { attempts: st[0].attempts, correct: st[0].correct } }));
   };
 

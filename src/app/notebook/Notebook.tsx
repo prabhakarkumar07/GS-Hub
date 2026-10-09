@@ -7,8 +7,8 @@ import { ConfigNotice, Empty, PageHeader, Spinner, Stat } from "@/components/ui"
 import { QuestionBody, QuestionMeta, SolutionBox } from "@/components/QuestionBody";
 import { BookmarkButton } from "@/components/BookmarkButton";
 import { RichText } from "@/components/RichText";
-import { getSupabase } from "@/lib/supabase/client";
-import { isSupabaseConfigured } from "@/lib/supabase/env";
+import { fetchApi } from "@/lib/api-client";
+import { useAuth } from "@clerk/nextjs";
 import type { OptionKey, Question, QuizMode } from "@/lib/types";
 import { fetchQuizIds, startQuiz } from "../practice/startQuiz";
 import { IconTrash } from "@/components/icons";
@@ -18,6 +18,7 @@ interface MistakeRow { question_id: string; last_selected: OptionKey | null; tim
 export function Notebook() {
   const { t, user, authReady, subjectName, topicName, pick, taxonomy, lang } = useApp();
   const router = useRouter();
+  const { getToken } = useAuth();
   const [rows, setRows] = useState<MistakeRow[] | null>(null);
   const [bookmarks, setBookmarks] = useState<Set<string>>(new Set());
   const [subject, setSubject] = useState<number | null>(null);
@@ -27,24 +28,26 @@ export function Notebook() {
   const [starting, setStarting] = useState(false);
 
   useEffect(() => {
-    if (!authReady || !user || !isSupabaseConfigured) return;
+    if (!authReady || !user) return;
     (async () => {
-      const sb = getSupabase();
-      const { data: m } = await sb.from("mistakes").select("question_id, last_selected, times_missed, last_missed_at").order("last_missed_at", { ascending: false });
-      const list = (m as MistakeRow[]) ?? [];
-      const ids = list.map((r) => r.question_id);
-      if (ids.length) {
-        const [{ data: qs }, { data: bm }] = await Promise.all([
-          sb.from("questions").select("*, high_priority").in("id", ids),
-          sb.from("bookmarks").select("question_id").in("question_id", ids),
-        ]);
+      try {
+        const token = await getToken({ template: "supabase" });
+        const data = await fetchApi("/user/notebook", {}, token);
+        
+        const qs = data.questions || [];
+        const mk = data.entries || [];
+        const bmData = await fetchApi("/user/bookmarks", {}, token); // Just to get bookmarked ids
+        
         const byId = new Map(((qs as Question[]) ?? []).map((q) => [q.id, q]));
-        list.forEach((r) => { r.question = byId.get(r.question_id); });
-        setBookmarks(new Set((bm ?? []).map((b) => b.question_id as string)));
+        mk.forEach((r: any) => { r.question = byId.get(r.question_id); });
+        
+        setBookmarks(new Set((bmData.questions || []).map((b: any) => b.id)));
+        setRows(mk.filter((r: any) => r.question));
+      } catch (err) {
+        console.error("Failed to load notebook:", err);
       }
-      setRows(list.filter((r) => r.question));
     })();
-  }, [authReady, user]);
+  }, [authReady, user, getToken]);
 
   const summary = useMemo(() => {
     const bySubject = new Map<number, number>(), byTopic = new Map<number, number>();
@@ -64,21 +67,26 @@ export function Notebook() {
   const smartQuiz = async (mode: QuizMode) => {
     setStarting(true);
     try {
-      const ids = await fetchQuizIds({ subjectIds: subject ? [subject] : [], topicIds: topic ? [topic] : [], count: 150, source: "mistakes", highPriorityOnly: hpOnly });
+      const clerkToken = user ? await getToken({ template: "supabase" }) : null;
+      const ids = await fetchQuizIds({ subjectIds: subject ? [subject] : [], topicIds: topic ? [topic] : [], count: 150, source: "mistakes", highPriorityOnly: hpOnly }, clerkToken);
       if (!ids.length) { setStarting(false); return; }
       const label = topic ? topicName(topic) : subject ? subjectName(subject) : "All";
-      const id = await startQuiz({ questionIds: ids, mode, source: "mistakes", title: `Mistakes · ${label}`, config: { subject, topic, hpOnly }, user, settings: taxonomy.settings });
+      const id = await startQuiz({ questionIds: ids, mode, source: "mistakes", title: `Mistakes · ${label}`, config: { subject, topic, hpOnly }, user, clerkToken, settings: taxonomy.settings });
       router.push(`/quiz/${id}`);
     } catch { setStarting(false); }
   };
 
   const remove = async (qid: string) => {
     if (!user) return;
-    await getSupabase().from("mistakes").delete().eq("user_id", user.id).eq("question_id", qid);
-    setRows((r) => (r ?? []).filter((x) => x.question_id !== qid));
+    try {
+      const token = await getToken({ template: "supabase" });
+      await fetchApi(`/user/notebook/${qid}`, { method: "DELETE" }, token);
+      setRows((r) => (r ?? []).filter((x) => x.question_id !== qid));
+    } catch (e) {
+      console.error(e);
+    }
   };
 
-  if (!isSupabaseConfigured) return <div className="container-page py-10"><ConfigNotice /></div>;
   if (!authReady || rows === null) return <Spinner label={t("loading")} />;
 
   const topicsInSubject = [...summary.byTopic.entries()].filter(([tid]) => !subject || taxonomy.topics.find((x) => x.id === tid)?.subject_id === subject);

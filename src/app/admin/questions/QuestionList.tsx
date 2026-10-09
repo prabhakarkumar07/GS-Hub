@@ -2,7 +2,8 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useApp } from "@/components/providers";
-import { getSupabase } from "@/lib/supabase/client";
+import { fetchApi } from "@/lib/api-client";
+import { useAuth } from "@clerk/nextjs";
 import { stripHtml } from "@/lib/html";
 import type { Question } from "@/lib/types";
 import { IconEdit, IconTrash } from "@/components/icons";
@@ -11,6 +12,7 @@ const PAGE = 25;
 
 export function QuestionList() {
   const { taxonomy, subjectName, topicName } = useApp();
+  const { getToken } = useAuth();
   const [rows, setRows] = useState<Question[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
@@ -24,30 +26,47 @@ export function QuestionList() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    let query = getSupabase().from("questions").select("*", { count: "exact" }).order("created_at", { ascending: false }).range(page * PAGE, page * PAGE + PAGE - 1);
-    if (subject) query = query.eq("subject_id", Number(subject));
-    if (topic) query = query.eq("topic_id", Number(topic));
-    if (exam) query = query.eq("exam_id", Number(exam));
-    if (status !== "all") query = query.eq("is_dropped", status === "dropped");
-    if (source) query = query.eq("source", source);
-    if (q.trim()) query = query.or(`question_en.ilike.%${q.trim().replace(/[%,()]/g, " ")}%,question_hi.ilike.%${q.trim().replace(/[%,()]/g, " ")}%`);
-    const { data, count } = await query;
-    setRows((data as Question[]) ?? []);
-    setTotal(count ?? 0);
+    try {
+      const token = await getToken({ template: "supabase" });
+      const { questions, count } = await fetchApi("/admin/questions/search", {
+        method: "POST",
+        body: JSON.stringify({
+          page,
+          perPage: PAGE,
+          subject: subject ? Number(subject) : undefined,
+          topic: topic ? Number(topic) : undefined,
+          exam: exam ? Number(exam) : undefined,
+          status,
+          source,
+          search: q.trim().replace(/[%,()]/g, " ") || undefined
+        })
+      }, token);
+      
+      setRows((questions as Question[]) ?? []);
+      setTotal(count ?? 0);
+    } catch (e) {
+      console.error("Failed to search questions", e);
+    }
     setLoading(false);
-  }, [page, subject, topic, exam, status, source, q]);
+  }, [page, subject, topic, exam, status, source, q, getToken]);
 
   useEffect(() => { const h = setTimeout(load, 250); return () => clearTimeout(h); }, [load]);
   useEffect(() => { setPage(0); }, [subject, topic, exam, status, source, q]);
 
   const toggleDropped = async (row: Question) => {
-    await getSupabase().from("questions").update({ is_dropped: !row.is_dropped }).eq("id", row.id);
+    const token = await getToken({ template: "supabase" });
+    await fetchApi(`/admin/questions/${row.id}`, { method: "PUT", body: JSON.stringify({ is_dropped: !row.is_dropped }) }, token);
     setRows((rs) => rs.map((r) => (r.id === row.id ? { ...r, is_dropped: !r.is_dropped } : r)));
   };
   const remove = async (row: Question) => {
     if (!confirm("Delete this question permanently? Student attempts on it will also be removed. Prefer 'Mark dropped' for BPSC-cancelled questions.")) return;
-    const { error } = await getSupabase().from("questions").delete().eq("id", row.id);
-    if (error) alert(error.message); else load();
+    try {
+      const token = await getToken({ template: "supabase" });
+      await fetchApi(`/admin/questions/${row.id}`, { method: "DELETE" }, token);
+      load();
+    } catch (error: any) {
+      alert(error.message);
+    }
   };
 
   return (

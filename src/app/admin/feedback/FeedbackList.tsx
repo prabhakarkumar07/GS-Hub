@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
-import { getSupabase } from "@/lib/supabase/client";
+import { fetchApi } from "@/lib/api-client";
+import { useAuth } from "@clerk/nextjs";
 import { Spinner } from "@/components/ui";
 import { IconTrash } from "@/components/icons";
 
@@ -9,13 +10,18 @@ interface Row { id: number; kind: string; page: string | null; message: string; 
 export function FeedbackList() {
   const [rows, setRows] = useState<Row[] | null>(null);
   const [kind, setKind] = useState<string>("");
+  const { getToken } = useAuth();
+  
   useEffect(() => {
-    getSupabase().from("feedback").select("*").order("created_at", { ascending: false }).limit(300).then(({ data }) => setRows((data as Row[]) ?? []));
-  }, []);
+    getToken({ template: "supabase" }).then((token) => {
+      fetchApi("/admin/feedback", {}, token).then((data) => setRows(data.feedback));
+    });
+  }, [getToken]);
   if (!rows) return <Spinner />;
   const shown = rows.filter((r) => !kind || r.kind === kind);
   const remove = async (id: number) => {
-    await getSupabase().from("feedback").delete().eq("id", id);
+    const token = await getToken({ template: "supabase" });
+    await fetchApi(`/admin/feedback/${id}`, { method: "DELETE" }, token);
     setRows((rs) => (rs ?? []).filter((r) => r.id !== id));
   };
   return (

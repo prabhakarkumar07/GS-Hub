@@ -1,19 +1,26 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useApp } from "@/components/providers";
-import { getSupabase } from "@/lib/supabase/client";
+import { fetchApi } from "@/lib/api-client";
+import { useAuth } from "@clerk/nextjs";
 
 export function SettingsForm() {
   const { taxonomy, reloadTaxonomy } = useApp();
+  const { getToken } = useAuth();
   const [v, setV] = useState(taxonomy.settings);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   useEffect(() => { setV(taxonomy.settings); }, [taxonomy.settings]);
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
-    const { error } = await getSupabase().from("app_settings").update({ ...v, updated_at: new Date().toISOString() }).eq("id", 1);
-    setMsg(error ? { ok: false, text: error.message } : { ok: true, text: "Saved ✓ — applies to quizzes started from now on." });
-    if (!error) reloadTaxonomy();
+    try {
+      const token = await getToken({ template: "supabase" });
+      await fetchApi("/admin/settings", { method: "PUT", body: JSON.stringify(v) }, token);
+      setMsg({ ok: true, text: "Saved ✓ — applies to quizzes started from now on." });
+      reloadTaxonomy();
+    } catch (error: any) {
+      setMsg({ ok: false, text: error.message });
+    }
   };
 
   return (
