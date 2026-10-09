@@ -82,10 +82,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     
     async function loadOrCreateProfile() {
       // 1. Try to fetch existing profile
-      const { data, error } = await supabase
+      const { data, error } = await supabase!
         .from("profiles")
         .select("id, full_name, role, preferred_lang")
-        .eq("id", clerkUser.id)
+        .eq("id", clerkUser!.id)
         .maybeSingle();
 
       if (data) {
@@ -95,13 +95,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
       // 2. If it doesn't exist, create it
       const newProfile = {
-        id: clerkUser.id,
-        full_name: clerkUser.fullName,
+        id: clerkUser!.id,
+        full_name: clerkUser!.fullName,
         role: "student",
         preferred_lang: "en",
       };
 
-      const { data: inserted, error: insertError } = await supabase
+      const { data: inserted, error: insertError } = await supabase!
         .from("profiles")
         .insert(newProfile)
         .select("id, full_name, role, preferred_lang")
