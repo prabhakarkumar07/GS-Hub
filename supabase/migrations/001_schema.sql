@@ -262,6 +262,7 @@ alter table public.feedback        enable row level security;
 
 -- profiles: own row (admins can read all). Role column can't be self-edited.
 create policy "profiles: read own"   on public.profiles for select using (id = (auth.jwt()->>'sub') or public.is_admin());
+create policy "profiles: insert own" on public.profiles for insert with check (id = (auth.jwt()->>'sub'));
 create policy "profiles: update own" on public.profiles for update using (id = (auth.jwt()->>'sub')) with check (id = (auth.jwt()->>'sub'));
 revoke update on public.profiles from anon, authenticated;
 grant update (full_name, phone, preferred_lang) on public.profiles to authenticated;
