@@ -79,12 +79,40 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setProfile(null);
       return;
     }
-    supabase
-      .from("profiles")
-      .select("id, full_name, role, preferred_lang")
-      .eq("id", clerkUser.id)
-      .maybeSingle()
-      .then(({ data }) => setProfile((data as Profile) ?? null));
+    
+    async function loadOrCreateProfile() {
+      // 1. Try to fetch existing profile
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id, full_name, role, preferred_lang")
+        .eq("id", clerkUser.id)
+        .maybeSingle();
+
+      if (data) {
+        setProfile(data as Profile);
+        return;
+      }
+
+      // 2. If it doesn't exist, create it
+      const newProfile = {
+        id: clerkUser.id,
+        full_name: clerkUser.fullName,
+        role: "student",
+        preferred_lang: "en",
+      };
+
+      const { data: inserted, error: insertError } = await supabase
+        .from("profiles")
+        .insert(newProfile)
+        .select("id, full_name, role, preferred_lang")
+        .single();
+
+      if (!insertError && inserted) {
+        setProfile(inserted as Profile);
+      }
+    }
+
+    loadOrCreateProfile();
   }, [clerkUser, supabase]);
 
   const reloadTaxonomy = useCallback(async () => {
