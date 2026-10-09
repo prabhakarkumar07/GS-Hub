@@ -12,7 +12,7 @@ import { IconCheck } from "@/components/icons";
 const COUNTS = [10, 20, 30];
 
 export function QuizBuilder() {
-  const { t, pick, taxonomy, user, authReady, lang } = useApp();
+  const { t, pick, taxonomy, user, profile, authReady, lang } = useApp();
   const router = useRouter();
   const params = useSearchParams();
 
@@ -187,11 +187,21 @@ export function QuizBuilder() {
             <div className="space-y-4">
               <div className="flex flex-wrap gap-2">
                 <button onClick={() => setExamIds([])} className={examIds.length === 0 ? "chip-on" : "chip-off"}>{t("all_years")}</button>
-                {taxonomy.exams.filter((ex) => ex.is_active).map((ex) => (
-                  <button key={ex.id} onClick={() => toggle(examIds, ex.id, setExamIds)} className={examIds.includes(ex.id) ? "chip-on" : "chip-off"}>
-                    {ex.short_name}{ex.year ? <span className="opacity-70"> · {ex.year}</span> : null}
-                  </button>
-                ))}
+                {taxonomy.exams.filter((ex) => ex.is_active).map((ex) => {
+                  const isLocked = ex.is_premium && (!user || profile?.subscription_tier !== "premium");
+                  return (
+                    <button key={ex.id} onClick={() => {
+                        if (isLocked) {
+                          router.push("/pricing");
+                          return;
+                        }
+                        toggle(examIds, ex.id, setExamIds);
+                      }} className={examIds.includes(ex.id) ? "chip-on" : "chip-off"}>
+                      {isLocked && <span className="mr-1">🔒</span>}
+                      {ex.short_name}{ex.year ? <span className="opacity-70"> · {ex.year}</span> : null}
+                    </button>
+                  );
+                })}
               </div>
               <label className="flex items-center gap-2.5 rounded-xl bg-gold-50 p-3 text-sm">
                 <input type="checkbox" className="h-4 w-4 accent-maroon" checked={hpOnly} onChange={(e) => setHpOnly(e.target.checked)} />

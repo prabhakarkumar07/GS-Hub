@@ -6,7 +6,7 @@ import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { translate, type TKey } from "@/lib/i18n";
 import type { AppSettings, AppUser, Exam, Lang, Subject, Topic } from "@/lib/types";
 
-interface Profile { id: string; full_name: string | null; role: "student" | "admin"; preferred_lang: Lang }
+interface Profile { id: string; full_name: string | null; role: "student" | "admin"; preferred_lang: Lang; subscription_tier: "free" | "premium" }
 
 interface Taxonomy {
   subjects: Subject[];
@@ -84,7 +84,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       // 1. Try to fetch existing profile
       const { data, error } = await supabase!
         .from("profiles")
-        .select("id, full_name, role, preferred_lang")
+        .select("id, full_name, role, preferred_lang, subscription_tier")
         .eq("id", clerkUser!.id)
         .maybeSingle();
 
@@ -104,7 +104,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const { data: inserted, error: insertError } = await supabase!
         .from("profiles")
         .insert(newProfile)
-        .select("id, full_name, role, preferred_lang")
+        .select("id, full_name, role, preferred_lang, subscription_tier")
         .single();
 
       if (!insertError && inserted) {

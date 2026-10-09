@@ -63,6 +63,7 @@ export interface Exam {
   category: "pyq" | "current_affairs" | "test_series" | "other";
   sort_order: number;
   is_active: boolean;
+  is_premium?: boolean;
 }
 
 export interface AppSettings {
